@@ -1,0 +1,167 @@
+Clear the DB
+---------------------------------------------------------------------------------------------------------------------------------------
+MATCH (n) DETACH DELETE n
+
+CALL gds.graph.list()
+YIELD graphName
+CALL gds.graph.drop(graphName)
+YIELD graphName AS droppedGraph
+RETURN droppedGraph;
+
+
+---------------------------------------------------------------------------------------------------------------------------------------
+LOAD CSV FROM 'https://github.com/Yiannis7918/triplets_expanded_tail_small/blob/main/rule_triplets_III_expanded.csv?raw=true' AS row
+WITH row
+// Skip the header row by checking for the header text in the first element
+WHERE row[0] <> 'Head' 
+ 
+// Continue with the rest of the query
+MERGE (h:Head {name: row[0]})               // Create or match the Head node
+MERGE (t:Tail {name: row[4]})               // Create or match the Tail node
+SET t.newProperty = row[3]                  // Set a new property on the Tail node
+MERGE (a:Article {name: row[6]})            // Create or match the Article node using row[6] as the name
+ 
+// Create a dynamic relationship between Head and Tail using apoc.create.relationship
+WITH h, t, a, row
+CALL apoc.merge.relationship(h, 'REL', {name:row[1]},{}, t,{}) YIELD rel AS rel1  // Create a dynamic relationship based on row[1]
+ 
+// Ensure only one unique CONTAINS relationship from Article to Head
+MERGE (a)-[rel2:CONTAINS]->(h)              // Only one CONTAINS relationship between Article and Head
+ 
+RETURN h, rel1, a, rel2, t
+
+
+Cypher Projection
+----------------------------------------------------------------------------------------------------
+
+match (source)
+where source:Head or source:Article
+optional match (source)-[r:REL|CONTAINS]->(target)
+where target:Head or target:Tail
+with gds.graph.project(
+    'Chapter_III',
+    source,
+    target,
+    {
+        sourceNodeLabels: labels(source),
+        targetNodeLabels: labels(target),
+        relationshipType: type(r)
+    } 
+) as g
+return g.graphName as graph, g.nodeCount as nodes, g.relationshipCount as rels
+
+
+
+DAG check
+----------------------------------------------------------------------------------------------------
+
+We have to check whether our graph is a DAG, since this will impact the validity of the CM that we use. 
+In order to check for DAG, we need to use the Topological Sort algorithm. Then, in case any of the graph's nodes are missing from the sorting, we do not have a DAG network. 
+
+CALL gds.dag.topologicalSort.stream("Chapter_III", {computeMaxDistanceFromSource: true})
+YIELD nodeId, maxDistanceFromSource
+RETURN gds.util.asNode(nodeId).name AS name, maxDistanceFromSource
+ORDER BY maxDistanceFromSource, name
+
+
+CM used
+----------------------------------------------------------------------------------------------------
+
+
+// Compute and write Closeness Centrality measure
+call gds.closeness.write('Chapter_III', {writeProperty: 'ClosenessCentrality'})
+yield centralityDistribution, nodePropertiesWritten
+return centralityDistribution, nodePropertiesWritten
+
+
+// Compute and write Degree Centrality measure
+CALL gds.degree.write('Chapter_III', { writeProperty: 'DegreeCentrality' })
+YIELD centralityDistribution, nodePropertiesWritten
+
+// Compute and write Betweeness Centrality measure
+CALL gds.betweenness.write('Chapter_III', { writeProperty: 'BetweennessCentrality' })
+YIELD centralityDistribution, nodePropertiesWritten
+RETURN centralityDistribution, nodePropertiesWritten
+
+
+// Compute and write Eigenvector Centrality
+call gds.eigenvector.write('Chapter_III',
+{writeProperty: 'EigenCentrality'})
+YIELD nodePropertiesWritten
+RETURN  nodePropertiesWritten
+
+
+// Compute and write PageRank
+CALL gds.pageRank.write('Chapter_III', {
+  dampingFactor: 0.85,
+  writeProperty: 'pagerank'})
+YIELD nodePropertiesWritten, ranIterations
+RETURN  nodePropertiesWritten	
+
+
+// Compute and write HITS
+call gds.hits.write('Chapter_III',
+{writeProperty: 'hits'})
+YIELD nodePropertiesWritten
+RETURN  nodePropertiesWritten
+
+
+
+// Filter based on most important nodes from HITS algorithm
+WITH ['draft budget', 'introduction draw union institution concern', 'summary datum', 'work document refer subparagraph', 'work document', 'publicprivate partnership', 'establishment plan', 'budget', 'union body', 'line', 'basic act', 'resource pay decision 2014335eu euratom', 'reserve shall enter separate title', 'draft amend budget', 'implementation union act'] as heads,  ['expenditure', 'revenue', 'union', 'appropriation', 'point', 'section', 'total', 'year', 'payment appropriation', 'negative revenue', 'negative remuneration', 'deposit', 'general statement'] as tails
+MATCH (a:Article)-[r:CONTAINS]->(h:Head)-[r1:REL]->(t:Tail)
+WHERE h.name in heads AND t.name in tails
+RETURN a,r,h,r1,t
+
+
+Set weights on relationships
+-----------------------------------------------------------------------------------
+WITH ['draft budget', 'introduction draw union institution concern', 'summary datum', 'work document refer subparagraph', 'work document', 'publicprivate partnership', 'establishment plan', 'budget', 'union body', 'line', 'basic act', 'resource pay decision 2014335eu euratom', 'reserve shall enter separate title', 'draft amend budget', 'implementation union act'] as heads,  ['expenditure', 'revenue', 'union', 'appropriation', 'point', 'section', 'total', 'year', 'payment appropriation', 'negative revenue', 'negative remuneration', 'deposit', 'general statement'] as tails
+MATCH (a:Article)-[r:CONTAINS]->(h:Head)-[r1:REL]->(t:Tail)
+WHERE h.name in heads AND t.name in tails
+SET r1.weight = CASE 
+    WHEN r1.name = 'show' then 0.452
+    WHEN r1.name = 'contain' then 0.262
+    WHEN r1.name = 'comprise' then 0.071
+    WHEN r1.name in ['provide','refer'] then 0.048
+    ELSE 0.024
+    END,
+    r.weight = 1
+RETURN a,h,t,r,r1
+
+
+
+Create a Cypher projection of the subgraph
+--------------------------------------------------------------------------------------
+match (n)-[r:CONTAINS|REL]->(t)
+where r.weight is not null
+return gds.graph.project('SUbG', n, t,
+	{
+	sourceNodeLabels: labels(n),
+	targetNodeLabels: labels(t),
+	relationshipType: type(r),
+	relationshipProperties: r{ .weight }
+	
+})
+
+
+
+Run the Longest Path Algorithm
+--------------------------------------------------------------------------------------
+CALL gds.dag.longestPath.stream("SUbG", {relationshipWeightProperty: "weight"})
+YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
+RETURN
+    index,
+    gds.util.asNode(sourceNode).name AS sourceNode,
+    gds.util.asNode(targetNode).name AS targetNode,
+    [nodeId IN nodeIds | gds.util.asNode(nodeId).name] AS nodeNames,
+    totalCost
+order by totalCost desc
+
+
+Run the Louvain Community Detection
+--------------------------------------------------------------------------------------
+CALL gds.louvain.write('SUbG',{
+  writeProperty: 'finalCommunity'
+})
+YIELD communityCount, modularity;
