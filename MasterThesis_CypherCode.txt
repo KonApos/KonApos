@@ -165,3 +165,24 @@ CALL gds.louvain.write('SUbG',{
   writeProperty: 'finalCommunity'
 })
 YIELD communityCount, modularity;
+
+
+--------------------------------------------------------------------------------------
+CALL gds.louvain.write('SUbG', {
+  writeProperty: 'intermediateCommunities',
+  includeIntermediateCommunities: true
+})
+YIELD communityCount, modularity, modularities
+
+
+Obtain intermediate communities
+--------------------------------------------------------------------------------------
+match (n)-[r:CONTAINS|REL]-(t) where r.weight is not null return distinct labels(n), n.name as name, toIntegerList(n.intermediateCommunities)[2] AS penultimateCommunities, toIntegerList(n.intermediateCommunities)[3] AS finalCommunities
+
+
+Write intermediate communities
+--------------------------------------------------------------------------------------
+match (n)-[r:CONTAINS|REL]-(t) where r.weight is not null
+set n.penultimateCommunity = toIntegerList(n.intermediateCommunities)[2],
+    t.penultimateCommunity = toIntegerList(t.intermediateCommunities)[2]
+return n,r,t
