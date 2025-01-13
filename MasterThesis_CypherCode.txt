@@ -105,7 +105,17 @@ call gds.hits.write('Chapter_III',
 YIELD nodePropertiesWritten
 RETURN  nodePropertiesWritten
 
+// Obtain 15 most important Hubs
+match (h)
+return distinct labels(h) , h.name, h.hitshub as Hub_Score
+order by Hub_Score desc
+limit 15
 
+// Obtain the most important Authorities
+match (h)
+return distinct labels(h) , h.name, h.hitsauth as Authority_Score
+order by Authority_Score desc
+limit 15
 
 // Filter based on most important nodes from HITS algorithm
 WITH ['draft budget', 'introduction draw union institution concern', 'summary datum', 'work document refer subparagraph', 'work document', 'publicprivate partnership', 'establishment plan', 'budget', 'union body', 'line', 'basic act', 'resource pay decision 2014335eu euratom', 'reserve shall enter separate title', 'draft amend budget', 'implementation union act'] as heads,  ['expenditure', 'revenue', 'union', 'appropriation', 'point', 'section', 'total', 'year', 'payment appropriation', 'negative revenue', 'negative remuneration', 'deposit', 'general statement'] as tails
@@ -119,14 +129,8 @@ Set weights on relationships
 WITH ['draft budget', 'introduction draw union institution concern', 'summary datum', 'work document refer subparagraph', 'work document', 'publicprivate partnership', 'establishment plan', 'budget', 'union body', 'line', 'basic act', 'resource pay decision 2014335eu euratom', 'reserve shall enter separate title', 'draft amend budget', 'implementation union act'] as heads,  ['expenditure', 'revenue', 'union', 'appropriation', 'point', 'section', 'total', 'year', 'payment appropriation', 'negative revenue', 'negative remuneration', 'deposit', 'general statement'] as tails
 MATCH (a:Article)-[r:CONTAINS]->(h:Head)-[r1:REL]->(t:Tail)
 WHERE h.name in heads AND t.name in tails
-SET r1.weight = CASE 
-    WHEN r1.name = 'show' then 0.452
-    WHEN r1.name = 'contain' then 0.262
-    WHEN r1.name = 'comprise' then 0.071
-    WHEN r1.name in ['provide','refer'] then 0.048
-    ELSE 0.024
-    END,
-    r.weight = 1
+SET r1.weight = 1,
+     r.weight = 1
 RETURN a,h,t,r,r1
 
 
@@ -143,20 +147,6 @@ return gds.graph.project('SUbG', n, t,
 	relationshipProperties: r{ .weight }
 	
 })
-
-
-
-Run the Longest Path Algorithm
---------------------------------------------------------------------------------------
-CALL gds.dag.longestPath.stream("SUbG", {relationshipWeightProperty: "weight"})
-YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
-RETURN
-    index,
-    gds.util.asNode(sourceNode).name AS sourceNode,
-    gds.util.asNode(targetNode).name AS targetNode,
-    [nodeId IN nodeIds | gds.util.asNode(nodeId).name] AS nodeNames,
-    totalCost
-order by totalCost desc
 
 
 Run the Louvain Community Detection
@@ -184,5 +174,5 @@ Write intermediate communities
 --------------------------------------------------------------------------------------
 match (n)-[r:CONTAINS|REL]-(t) where r.weight is not null
 set n.penultimateCommunity = toIntegerList(n.intermediateCommunities)[2],
-    t.penultimateCommunity = toIntegerList(t.intermediateCommunities)[2]
+    t.penultimateCommunity = toIntegerList(t.intermediateCommunities)[2],
 return n,r,t
