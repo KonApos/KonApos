@@ -1,3 +1,6 @@
+## Code for Master Thesis - Construction of a knowledge graph using EU's financial regulations
+## Author: Konstantinos Panagiotis Apostolou
+
 # Load necessary library
 library(readr)
 library(dplyr)
